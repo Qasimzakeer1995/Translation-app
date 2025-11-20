@@ -1,12 +1,10 @@
 name: CI/CD Laravel -> EC2
 
-# Trigger on pushes to main (change branch name if needed)
 on:
   push:
     branches: [ main ]
 
 jobs:
-  # CI job: install deps and run tests
   ci:
     runs-on: ubuntu-latest
     steps:
@@ -23,13 +21,9 @@ jobs:
           curl -sS https://getcomposer.org/installer | php
           php composer.phar install --no-interaction --prefer-dist
 
-      - name: Copy example env (CI only)
-        run: cp .env.example .env
-
       - name: Generate app key
         run: php artisan key:generate
 
-  # CD job: runs after CI and deploys to EC2 via SSH+rsync
   deploy:
     needs: ci
     runs-on: ubuntu-latest
@@ -37,33 +31,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup PHP 8.1 (build step, optional)
+      - name: Setup PHP 8.1
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
 
-      - name: Install composer (prepare artifact)
+      - name: Install composer
         run: |
           curl -sS https://getcomposer.org/installer | php
           php composer.phar install --no-interaction --prefer-dist --no-dev
 
-      - name: Prepare environment file for deploy
-        run: cp .env.example .env
-
-      # Add SSH key to agent so we can rsync/ssh to EC2
-      - name: Start ssh-agent and add key
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.5.4
         with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }} # required secret (PEM)
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      # Sync repository files to the EC2 target folder
+      # ▼▼▼ ADD THIS STEP ▼▼▼
+      - name: Add EC2 to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+      # ▲▲▲ ADD THIS STEP ▲▲▲
+
       - name: Rsync files to server
         env:
-          SERVER_USER: ${{ secrets.SERVER_USER }}   # e.g. ubuntu
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}   # EC2 public IP or hostname
-          SERVER_PATH: ${{ secrets.SERVER_PATH }}   # e.g. /var/www/your-app
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_PATH: ${{ secrets.SERVER_PATH }}
         run: |
-          # exclude files that shouldn't be on server from rsync
           rsync -az --delete \
             --exclude='.git' \
             --exclude='.github' \
@@ -71,7 +66,6 @@ jobs:
             --exclude='.env' \
             ./ $SERVER_USER@$SERVER_HOST:$SERVER_PATH
 
-      # Run remote commands to finish deployment: install vendor, migrate, cache
       - name: Run remote deployment commands
         env:
           SERVER_USER: ${{ secrets.SERVER_USER }}
@@ -79,8 +73,7 @@ jobs:
           SERVER_PATH: ${{ secrets.SERVER_PATH }}
         run: |
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "
-            cd $SERVER_PATH || exit 1
-            # ensure correct PHP/composer on server; run composer install for prod
+            cd $SERVER_PATH
             composer install --no-dev --no-interaction --prefer-dist
             php artisan migrate --force
             php artisan config:cache
