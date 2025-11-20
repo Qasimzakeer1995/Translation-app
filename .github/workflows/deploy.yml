@@ -1,10 +1,12 @@
 name: CI/CD Laravel -> EC2
 
+# Trigger on pushes to main (change branch name if needed)
 on:
   push:
     branches: [ main ]
 
 jobs:
+  # CI job: install deps and run tests
   ci:
     runs-on: ubuntu-latest
     steps:
@@ -20,6 +22,8 @@ jobs:
         run: |
           curl -sS https://getcomposer.org/installer | php
           php composer.phar install --no-interaction --prefer-dist
+      - name: Copy example env (CI only)
+        run: cp .env.example .env
 
       - name: Generate app key
         run: php artisan key:generate
